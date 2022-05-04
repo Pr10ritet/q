@@ -1,0 +1,2 @@
+#12   1     *    *     * /usr/local/bin/wget -q -b -nd -P /usr/local/nodeny -m http://www.colocall.net/uaix/prefixes.txt
+0   0     1    *     * /usr/bin/perl /usr/local/nodeny/new_month.pl

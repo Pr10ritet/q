@@ -1,0 +1,244 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<title>Nodeny - Mpd5 + Radius</title>
+<meta http-equiv="Content-Type" content="text/html; charset=windows-1251">
+<link rel='stylesheet' href='../i/nody.css' type='text/css'>
+</head>
+<body>
+<div class='mainbody'>
+<table border=0 width=90% class="coment"><tr>
+<td><a href="../index.html"><img src="../i/logo.gif" border=0 valign=middle></a></td>
+<td align=center><b>Биллинговая система NoDeny. Настройка PPPoE сервера Mikrotik с привязкой к Radius.</b></td>
+</tr>
+</table>
+
+
+<div class='mainbody'>
+<br>
+
+
+<b>Настройка Radius</b><br>
+<br>
+
+Установите radius как <a href='radius.html'>указано здесь</a></b>.<br>
+<br>
+
+<div class="code"><div class="mark"><b>Важно!</b></div>
+Процедуры mysql будут выполняться от имени bill_kernel,
+этому логину обязательно дать права EXECUTE, проверяем:<br>
+<br>
+
+<div class="code"><div class="mark">команды mysql</div>
+use mysql;<br>
+select Execute_priv from db where Db='bill' and User='bill_kernel';
+</div>
+<div class="code"><div class="mark">должны видеть на экране</div>
+<pre>
++--------------+
+| Execute_priv |
++--------------+
+| Y            |
++--------------+
+</pre>
+</div>
+
+В противном случае:<br>
+<br>
+
+<div class="code"><div class="mark">команда mysql</div>
+GRANT EXECUTE ON bill.* TO 'bill_kernel'@'localhost';
+</div>
+
+
+</div>
+
+<br>
+<br>
+
+
+
+<div class="code"><div class="mark">Создаем необходимые процедуры mysql</div>
+<br>
+
+<div class="code"><div class="mark">команда bash</div>
+mysql -p
+</div>
+
+вводим root-пароль mysql (по умолчанию hardpass)<br>
+<br>
+
+<div class="code"><div class="mark">команды mysql. Процедура проверки логина-пароля</div>
+<pre>
+use bill;
+
+DROP PROCEDURE IF EXISTS `radcheck`;
+DELIMITER $$  
+CREATE PROCEDURE `radcheck` (IN login VARCHAR(64))
+BEGIN
+  SELECT id,name,'Password' AS Attribute,AES_DECRYPT(passwd,'hardpass3') AS Value,'=='
+    FROM users WHERE name=login;
+END$$
+DELIMITER ;
+</pre>
+</div>
+<br>
+
+Здесь hardpass3 - ключ шифрования паролей в БД NoDeny. Получить можно из конфига:<br>
+<br>
+
+<div class="code"><div class="mark">команда bash</div>
+grep Passwd_Key /usr/local/nodeny/nodeny.cfg.pl
+</div>
+
+<br>
+
+<div class="code"><div class="mark">команды mysql. Процедура получения атрибутов подключения</div>
+<pre>
+DROP PROCEDURE IF EXISTS `radreply`;
+DELIMITER $$  
+CREATE PROCEDURE `radreply` (IN login VARCHAR(64))
+BEGIN
+  DECLARE usr_id INT;  
+  DECLARE usr_ip VARCHAR(15);
+
+  SELECT id,ip INTO usr_id,usr_ip FROM users WHERE name=login;
+  INSERT into dblogin (mid,act,time) VALUES (usr_id,47,unix_timestamp());
+
+  SELECT NULL,login,'Framed-IP-Address',usr_ip,'=';
+  SELECT NULL,login,'Framed-IP-Netmask','255.255.255.255','=';
+  SELECT NULL,login,'Acct-Interim-Interval','50','=';
+END$$
+DELIMITER ;
+</pre>
+</div>
+
+<br>
+<br>
+
+<div class="code"><div class="mark">команды mysql. Процедура поддержания авторизации</div>
+<pre>
+DROP PROCEDURE IF EXISTS `radupdate`;
+DELIMITER $$  
+CREATE PROCEDURE `radupdate` (IN login VARCHAR(64))
+BEGIN
+  INSERT into dblogin (mid,act,time) VALUES
+    ((SELECT id FROM users WHERE name=login LIMIT 1),47,unix_timestamp());
+END$$
+DELIMITER ;
+</pre>
+</div>
+
+<br>
+
+<div class="code"><div class="mark">команды mysql. Процедура разъединения</div>
+<pre>
+DROP PROCEDURE IF EXISTS `radstop`;
+DELIMITER $$  
+CREATE PROCEDURE `radstop` (IN login VARCHAR(64))
+BEGIN
+  INSERT into dblogin (mid,act,time) VALUES
+    ((SELECT id FROM users WHERE name=login LIMIT 1),46,unix_timestamp());
+END$$
+DELIMITER ;
+</pre>
+</div>
+
+<br>
+<br>
+
+<div class="code"><div class="mark">команда bash</div>
+ee /usr/local/etc/raddb/sql.conf
+</div>
+<br>
+
+удаляем все запросы (фактически все начиная с authorize_check_query и
+до `}`) и вместо них вписываем:<br>
+<br>
+
+<div class="code"><div class="mark">текст</div>
+<pre>
+authorize_check_query = "call radcheck('%{SQL-User-Name}')"
+authorize_reply_query = "call radreply('%{SQL-User-Name}')"
+accounting_update_query = "call radupdate('%{SQL-User-Name}')"
+accounting_stop_query = "call radstop('%{SQL-User-Name}')"
+</pre>
+</div>
+
+<br>
+Проверяем:<br>
+<br>
+
+<div class="code"><div class="mark">команда bash</div>
+radtest login pass 127.0.0.1 0 hardpass5
+</div>
+где login и test соответственно логин и пароль реально существующей клиентской записи в NoDeny.<br>
+<br>
+</div>
+
+
+<br>
+<br>
+<br>
+
+
+<b>Настройка Mikrotik</b><br>
+<br>
+
+<img src='../i/mikrotik_radius.gif'><br>
+<br>
+
+
+<div class="code"><div class="mark">консольные команды mikrotik</div><pre>
+radius add address=1.1.1.2 secret=hardpass5 service=ppp
+radius incoming set accept=yes
+ppp aaa set accounting=yes use-radius=yes interim-update=50
+ppp profile set default local-address=2.2.2.2 dns-server=2.2.2.2
+interface pppoe-server server add interface=ether1 service-name=pppoe-in authentication=chap
+ip firewall nat add chain=srcnat action=src-nat to-addresses=2.2.2.2
+</pre>
+</div>
+
+где:<br>
+<br>
+<div class='coment'><pre>
+1.1.1.2		- ip radius сервера (сервера основной БД).
+hardpass5	- пароль для radius-запросов.
+2.2.2.2		- ip на внешнем интерфейсе Mikrotik.
+ether1		- интерфейс, принимающий pppoe соединения.
+dns-server	- dns сервер, который будет выдаваться клиентам.
+</pre>
+</div>
+
+На radius сервере:<br>
+<br>
+<div class="code"><div class="mark">команда bash</div>
+ee /usr/local/etc/raddb/clients.conf
+</div>
+
+<div class="code"><div class="mark">вставляем текст</div><pre>
+client 1.1.1.1 {
+        secret      = hardpass5
+        shortname   = NoDenyDB
+        nastype     = cisco
+}
+</pre>
+</div>
+
+<br>
+<br>
+<br>
+<br>
+
+
+
+</div>
+<br><br><br><br>
+<br><br><br><br>
+<br><br><br><br>
+<br><br><br><br>
+<br>
+<br>
+<br>
+<br></body>
+</html>

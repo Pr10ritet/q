@@ -1,0 +1,378 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<title>Nodeny - Mpd5 + Radius</title>
+<meta http-equiv="Content-Type" content="text/html; charset=windows-1251">
+<link rel='stylesheet' href='../i/nody.css' type='text/css'>
+</head>
+<body>
+<div class='mainbody'>
+<table border=0 width=90% class="coment"><tr>
+<td><a href="../index.html"><img src="../i/logo.gif" border=0 valign=middle></a></td>
+<td align=center><b>Биллинговая система NoDeny. Настройка PPPoE сервера mpd5 с привязкой к Radius.</b></td>
+</tr>
+</table>
+
+
+<div class='mainbody'>
+<br>
+
+Первая часть состоит из описания принципа работы, можете ее пропустить и <a href="#start">перейти к настройке</a>.<br>
+<br>
+
+<b>Описание принципа работы NoDeny+mpd5+radius</b><br>
+<br>
+
+<ol type=1 start=1>
+<li>Mpd принимает запрос на соединение и обращается к radius для проверки соответствия логин/пароль.</li>
+
+<li>Если в БД логин существует и соответствует паролю, то клиенту разрешается соединение. Обратите внимание,
+состояние клиента `заблокирован` или `не заблокирован` не влияет на сам факт соединения. Т.е. легальный
+абонент создает соединение и будет иметь доступ минимум к своей статистике, даже если доступ у него запрещен.</li>
+
+<li>После авторизации, radius передает mdp параметры клиента: ip, маску, а также другие данные,
+если необходимы.</li>
+
+<li>Кроме этого, происходит запись в базу NoDeny события &#171;запрос на авторизацию&#187;, которое будет обработано
+ядром NoDeny и преобразовано в событие авторизации.</li>
+
+<li>Mpd настраивается таким образом, что с определенным периодом будет посылать radius-у так называемые
+accounting пакеты для каждого соединения. Эти пакеты будут интерпретироваться как keep-alive пакеты,
+сообщающие ядру, что соединение не зависло.</li>
+
+<li>При разрыве соединения ядру NoDeny посылается запрос &#171;считать клиента неавторизованным&#187;.</li>
+</ol>
+
+Теперь детальнее.<br>
+<br>
+
+Механизм авторизации NoDeny базируется на том, что клиент будет считаться (не)авторизованным только
+в результате действий ядра NoDeny. Если ядро не запущено - состояние авторизации клиента не меняется
+ни при каких условиях даже если клиент установил соединение! Сам факт соединения говорит только о том,
+что у клиента легальные данные. Однако его судьба решается исключительно ядром.<br>
+<br>
+
+Поскольку доступ не проверяется на этапе соединения, возникает необходимость управлять им, а также
+шейпами где-то в другом месте. Этим занимается агент доступа, который синхронизируется с БД NoDeny
+и динамически подключает/отключает клиентов. Кроме того, если в момент существующего соединения
+будет заблокирован/разрешен доступ либо изменены скорости, тариф и т.д., на это будет немедленная
+реакция агента доступа. Таким образом, нет необходимости разъединять клиента для того чтобы изменить
+его доступ или другие параметры.<br>
+<br>
+
+Передача ядру запросов на авторизацию происходит через таблицу dblogin, в которую вписывается id
+клиента, а также запрашиваемый режим авторизации (`включить доступ`, `включить доступ только в сети
+второго направления`, `отключить доступ`, `считать неавторизованным`). Ядро периодически обращается
+к этой таблице и принимает решение о режиме действительной авторизации (`авторизован, но переработка трафика`,
+`авторизован и доступ разрешен`, `не авторизован`...). Если определенное количество времени от
+авторизованного клиента не поступает запросов на авторизацию, то ядро считает такого клиента неавторизованным.
+Таким образом обеспечивается защита от разного рода `зависших сессий`, когда оборудование считает
+клиента авторизованным, а фактически он уже разорвал соединение в результате сбоя. Такой механизм
+подержания авторизаций и предусмотрен в связке mpd+radius - периодически mpd будет посылать статистику
+по каждому соединению. такие запросы будут интерпретироваться как поддержание авторизации.<br>
+<br>
+
+
+
+<b><a name='start'>Установка PPPoE сервера mpd5 с привязкой к Radius</a></b><br>
+<br>
+
+
+
+
+<b>Настройка Radius</b><br>
+<br>
+
+Установите radius как <a href='radius.html'>указано здесь</a></b>.<br>
+<br>
+
+<div class="code"><div class="mark"><b>Важно!</b></div>
+Процедуры mysql будут выполняться от имени bill_kernel,
+этому логину обязательно дать права EXECUTE, проверяем:
+
+<div class="code"><div class="mark">команды mysql</div>
+use mysql;<br>
+select Execute_priv from db where Db='bill' and User='bill_kernel';
+</div>
+<div class="code"><div class="mark">должны видеть на экране</div>
+<pre>
++--------------+
+| Execute_priv |
++--------------+
+| Y            |
++--------------+
+</pre>
+</div>
+
+В противном случае:<br>
+<br>
+
+<div class="code"><div class="mark">команда mysql</div>
+GRANT SELECT,INSERT,UPDATE,DELETE,CREATE,DROP,INDEX,EXECUTE ON bill.* TO 'bill_kernel'@'localhost';
+</div>
+
+
+</div>
+
+<div class="code"><div class="mark">Создаем необходимые процедуры mysql</div>
+
+<div class="code"><div class="mark">команда bash</div>
+mysql -p
+</div>
+
+вводим root-пароль mysql (по умолчанию hardpass)<br>
+<br>
+
+<div class="code"><div class="mark">команды mysql. Процедура проверки логина-пароля</div>
+<pre>
+use bill;
+
+DROP PROCEDURE IF EXISTS `radcheck`;
+DELIMITER $$  
+CREATE PROCEDURE `radcheck` (IN login VARCHAR(64))
+BEGIN
+  SELECT id,name,'Password' AS Attribute,AES_DECRYPT(passwd,'hardpass3') AS Value,'=='
+    FROM users WHERE name=login;
+END$$
+DELIMITER ;
+</pre>
+</div>
+
+Здесь hardpass3 - ключ шифрования паролей в БД NoDeny. Получить можно из конфига:<br>
+<br>
+
+<div class="code"><div class="mark">команда bash</div>
+grep Passwd_Key /usr/local/nodeny/nodeny.cfg.pl
+</div>
+
+<br>
+
+<div class="code"><div class="mark">команды mysql. Процедура получения атрибутов подключения</div>
+<pre>
+DROP PROCEDURE IF EXISTS `radreply`;
+DELIMITER $$  
+CREATE PROCEDURE `radreply` (IN login VARCHAR(64))
+BEGIN
+  DECLARE usr_id INT;  
+  DECLARE usr_ip VARCHAR(15);
+
+  SELECT id,ip INTO usr_id,usr_ip FROM users WHERE name=login;
+  INSERT into dblogin (mid,act,time) VALUES (usr_id,47,unix_timestamp());
+
+  SELECT NULL,login,'Framed-IP-Address',usr_ip,'=';
+  SELECT NULL,login,'Framed-IP-Netmask','255.255.255.255','=';
+  SELECT NULL,login,'Framed-Protocol','PPP','=';
+END$$
+DELIMITER ;
+</pre>
+</div>
+
+<br>
+
+<div class="code"><div class="mark">команды mysql. Процедура поддержания авторизации</div>
+<pre>
+DROP PROCEDURE IF EXISTS `radupdate`;
+DELIMITER $$  
+CREATE PROCEDURE `radupdate` (IN login VARCHAR(64))
+BEGIN
+  INSERT into dblogin (mid,act,time) VALUES
+    ((SELECT id FROM users WHERE name=login LIMIT 1),47,unix_timestamp());
+END$$
+DELIMITER ;
+</pre>
+</div>
+
+<br>
+
+<div class="code"><div class="mark">команды mysql. Процедура разъединения</div>
+<pre>
+DROP PROCEDURE IF EXISTS `radstop`;
+DELIMITER $$  
+CREATE PROCEDURE `radstop` (IN login VARCHAR(64))
+BEGIN
+  INSERT into dblogin (mid,act,time) VALUES
+    ((SELECT id FROM users WHERE name=login LIMIT 1),46,unix_timestamp());
+END$$
+DELIMITER ;
+</pre>
+</div>
+
+<br>
+<br>
+
+<div class="code"><div class="mark">команда bash</div>
+ee /usr/local/etc/raddb/sql.conf
+</div>
+
+удаляем все запросы (фактически все начиная с authorize_check_query и
+до `}`) и вместо них вписываем:<br>
+<br>
+
+<div class="code"><div class="mark">текст</div>
+<pre>
+authorize_check_query = "call radcheck('%{SQL-User-Name}')"
+authorize_reply_query = "call radreply('%{SQL-User-Name}')"
+accounting_update_query = "call radupdate('%{SQL-User-Name}')"
+accounting_stop_query = "call radstop('%{SQL-User-Name}')"
+</pre>
+</div>
+
+<br>
+Проверяем:<br>
+<br>
+
+<div class="code"><div class="mark">команда bash</div>
+radtest login pass 127.0.0.1 0 hardpass5
+</div>
+где login и test соответственно логин и пароль реально существующей клиентской записи в NoDeny.<br>
+<br>
+</div>
+
+
+<br>
+<br>
+<br>
+
+
+<b>Настройка mpd5</b><br>
+<br>
+
+<div class="code"><div class="mark">команда bash</div>
+cd /usr/ports/net/mpd5 && make install clean
+</div>
+
+Будет выведена табличка с вопросом какие дополнительные модули установить. Они нам не понадобятся.<br>
+<br>
+
+Ведение логов:
+<div class="code"><div class="mark">команды bash</div>
+echo '!mpd' &gt;&gt; /etc/syslog.conf<br>
+echo '*.* /var/log/mpd.log' &gt;&gt; /etc/syslog.conf<br>
+touch /var/log/mpd.log<br>
+</div>
+
+Ротация логов:
+<div class="code"><div class="mark">команда bash</div>
+echo '/var/log/mpd.log 600 5 100 * JC' &gt;&gt; /etc/newsyslog.conf
+</div>
+
+<div class="code"><div class="mark">описание параметров ротации</div>
+<pre>
+600	- права на файлы
+5	- количество файлов в ротации
+100	- ротация будет произведена при достижении лога 100 кб
+*	- ротация по времени отключена
+JC	- упаковка файлов утилитой bzip2
+</pre>
+</div>
+
+
+<br>
+Автозапуск:
+<div class="code"><div class="mark">команда bash</div>
+echo mpd_enable=\”YES\” &gt;&gt; /etc/rc.conf
+</div>
+
+
+<div class="code"><div class="mark">команда bash</div>
+ee /usr/local/etc/mpd5/mpd.conf
+</div>
+
+<div class="code"><div class="mark">вставляем текст</div>
+<pre>
+startup:
+        set user admin hardpass6
+        set console self 127.0.0.1 5005
+        set console open
+        set web self 0.0.0.0 5006
+        set web open
+
+default:
+        load pppoe_server
+
+pppoe_server:
+
+        create bundle template B
+        set ipcp ranges 1.2.3.4/32 127.0.0.2/32
+	set ipcp dns 10.1.1.1
+	set ccp yes mppc
+	set mppc yes e40
+	set mppc yes e56
+	set mppc yes e128
+	set mppc yes stateless
+	set ecp disable dese-bis dese-old
+
+        create link template common pppoe
+        set link enable multilink
+        set link action bundle B
+        set link disable chap pap eap
+        set link enable pap
+        load radius
+        set pppoe service "*"
+
+        create link template em1 common
+        set link max-children 1000
+        set pppoe iface em1
+        set link enable incoming
+radius:
+        set radius server localhost hardpass5 1812 1813
+        set radius retries 3
+        set radius timeout 3
+        set radius me 127.0.0.1
+        set auth acct-update 45
+        set auth enable radius-auth
+        set auth enable radius-acct
+        set radius enable message-authentic
+</pre>
+</div>
+
+<div class="code"><div class="mark">Комментарии к mpd.conf</div>
+
+<div class="code"><div class="mark">Важно</div>
+Все строки, кроме комментариев и ссылок (строки которые заканчиваются на `:`),
+должны начинаться с отступа (пробела или табуляции).
+</div>
+
+<b>admin</b> и <b>hardpass6</b> - логин и пароль для доступа к управлению
+mpd5 через консоль или web-интерфейс (http://xx.xx.xx.xx:5006/). Не забудьте в
+фаерволе открыть tcp порт 5006.<br>
+<br>
+
+<b>1.2.3.4</b> - один из ip вашего сервера. Рекомендуем использовать реально
+существующий, например на внешнем интерфейсе. Этот ip будет использован
+в туннеле: ip сервера &lt;-&gt; клиентский ip.<br>
+<br>
+
+<b>10.1.1.1</b> - dns-сервер. Через пробел можно указать несколько.<br>
+<br>
+
+<b>em1</b> - Интерфейс, на который будут приниматься pppoe соединения.<br>
+<br>
+
+<b>acct-update 45</b> - период посылки accounting пакетов (используем для поддержания
+авторизаций) 45 секунд.<br>
+</div>
+
+<div class="code"><div class="mark">команда bash</div>
+/usr/local/etc/rc.d/mpd5 forcestart
+</div>
+
+
+
+<br>
+<br>
+<br>
+<br>
+
+
+
+</div>
+<br><br><br><br>
+<br><br><br><br>
+<br><br><br><br>
+<br><br><br><br>
+<br>
+<br>
+<br>
+<br></body>
+</html>

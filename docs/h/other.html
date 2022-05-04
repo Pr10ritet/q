@@ -1,0 +1,156 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<title>Nodeny</title>
+<meta http-equiv="Content-Type" content="text/html; charset=windows-1251">
+<link rel='stylesheet' href='../i/nody.css' type='text/css'>
+</head>
+<body>
+<div class='mainbody'>
+<table border=0 width=90% class="coment"><tr>
+<td><a href="../index.html"><img src="../i/logo.gif" border=0 valign=middle></a></td>
+<td align=center><b>Биллинговая система NoDeny</b></td>
+</tr></table>
+<br>
+<br>
+<br>
+
+<b><a name="phpmyadmin">Установка пакета phpMyAdmin</a>.</b><br>
+<br>
+phpMyAdmin — веб-приложение с открытым кодом, написанное на языке PHP и представляющее
+собой веб-интерфейс для администрирования СУБД MySQL.<br>
+<br>
+<div class=coment>
+При установке phpmyadmin из портов, автоматически устанавливается php, однако
+(в данный момент) если это осуществить, то php не будет установлен как модуль
+apache. Поэтому предварительно устанавливаем php:<br>
+<br>
+
+<div class='code'><div class='mark'>Команды bash</div><pre>
+cd /usr/ports/lang/php5
+make install clean
+</pre></div>
+
+Появится окно настроек, в котором необходимо поставить галку напротив пункта
+"Build Apache module".<br>
+<br>
+
+После установки, в конфиге апача (/usr/local/etc/apache22/httpd.conf)
+должна появится такая строка:<br>
+<br>
+
+LoadModule php5_module        libexec/apache22/libphp5.so<br>
+<br>
+
+Отредактируем конфиг:<br>
+<br>
+
+<div class='code'><div class='mark'>Команда bash</div><pre>
+ee /usr/local/etc/apache22/httpd.conf
+</pre></div>
+
+и в конце конфига добавляем строки:<br>
+<br>
+
+<div class='code'><pre>
+AddType application/x-httpd-php .php
+AddType application/x-httpd-php-source .phps
+</pre></div>
+
+Также находим строку, начинающуюся с DirectoryIndex. Изменяем ее на:<br>
+<br>
+
+<div class='code'><pre>
+DirectoryIndex index.html index.php
+</pre></div>
+
+
+Теперь устанавливаем phpmyadmin:<br>
+<br>
+
+<div class='code'><div class='mark'>Команды bash</div><pre>
+cd /usr/ports/databases/phpmyadmin
+make install clean
+</pre></div>
+
+В конце установки отобразится текст о том, что нужно добавить в конфиг
+апача, на данный момент следующее:<br>
+<br>
+
+<pre>
+    Alias /phpmyadmin/ "/usr/local/www/phpMyAdmin/"
+
+    <Directory "/usr/local/www/phpMyAdmin/">
+        Options none
+        AllowOverride Limit
+
+        Order Deny,Allow
+        Deny from all
+        Allow from 127.0.0.1 .example.com
+    </Directory>
+</pre>
+
+Заменяем Allow from 127.0.0.1 .example.com на Allow from all<br>
+<br>
+
+<div class='code'><div class='mark'>Команда bash</div><pre>
+apachectl restart
+</pre></div>
+
+Теперь создаем конфиг для phpmyadmin:<br>
+<br>
+
+<div class='code'><div class='mark'>Команды bash</div><pre>
+mkdir /usr/local/www/phpMyAdmin/config
+chown www /usr/local/www/phpMyAdmin/config
+</pre></div>
+
+<div class='code'><div class='mark'>В браузере:</div><pre>
+http://10.0.0.2/phpmyadmin/scripts/setup.php
+</pre></div>
+
+В куче менюшек-кнопок выбираем: add<br>
+<br>
+
+В появившейся страничке выбираем:<br>
+<br>
+
+Authentication type: http<br>
+<br>
+
+Сохраняем.<br>
+<br>
+
+Выбираем кодировку: жмем кнопку charsets и в поле default charset
+выбираем  windows-1251, жмем update<br>
+<br>
+
+Жмем save - конфигурация сохраняется<br>
+<br>
+
+<div class='code'><div class='mark'>Команды bash</div><pre>
+mv /usr/local/www/phpMyAdmin/config/config.inc.php /usr/local/www/phpMyAdmin/
+chmod 400 /usr/local/www/phpMyAdmin/config.inc.php
+rmdir /usr/local/www/phpMyAdmin/config
+</pre></div>
+
+<div class='code'><div class='mark'>В браузере:</div><pre>
+http://10.0.0.2/phpmyadmin/
+</pre></div>
+
+Появляется окно авторизации, в которое вводим логин root и его пароль как учетной
+записи mysql (не системы).
+</div>
+<br>
+<br>
+<br>
+<br>
+<br>
+<br>
+
+<br>
+<br>
+<br>
+<br>
+</body>
+</html>

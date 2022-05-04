@@ -1,0 +1,167 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<title>Nodeny - ipacct</title>
+<meta http-equiv="Content-Type" content="text/html; charset=windows-1251">
+<link rel='stylesheet' href='../i/nody.css' type='text/css'>
+</head>
+<body>
+<div class='mainbody'>
+<table border=0 width=90% class="coment"><tr>
+<td><a href="../index.html"><img src="../i/logo.gif" border=0 valign=middle></a></td>
+<td align=center><b>Биллинговая система NoDeny. Настройка учета трафика на основе ipacct</b></td>
+</tr></table>
+<br>
+<br>
+
+Ng_ipacct - Netgraph нода, разработана Романом Палагиным и предназначена для учета трафика. Ng_ipacct работает как модуль ядра.<br>
+<br>
+bash# cd /usr/ports/net-mgmt/ng_ipacct && make install clean<br>
+<br>
+Загружаем скомпилированный модуль, а также модуль ng_ipfw, в ядро:<br>
+<br>
+bash# kldload ng_ipacct<br>
+bash# kldload ng_ipfw<br>
+<br>
+Добавляем в автозагрузку:<br>
+<br>
+bash# echo ng_ipacct=\"YES\" &gt;&gt; /boot/loader.conf<br>
+bash# echo ng_ipfw_load=\"YES\" &gt;&gt; /boot/loader.conf<br>
+
+<br>
+bash# ee /usr/local/nodeny/ipacct.sh<br>
+<br>
+В скрипте THRESHOLD - максимальное количество записей в хеш-таблице, чем больше абонентов или реже период снятия статистики,
+тем больше должно быть это число.<br>
+<br>
+
+
+bash# chmod 700 /usr/local/nodeny/ipacct.sh<br>
+bash# echo /usr/local/nodeny/ipacct.sh &gt;&gt; /etc/rc.local<br>
+<br>
+
+Тестовый запуск:<br>
+<br>
+bash# /usr/local/nodeny/ipacct.sh<br>
+<br>
+
+Проверяем, что нода создалась:<br>
+<br>
+bash# ngctl show nod1:<br>
+<br>
+В результате получаем:<br>
+<pre>
+  Name: nod1            Type: ipacct          ID: 0000326a   Num hooks: 2
+  Local hook      Peer name       Peer type    Peer ID         Peer hook
+  ----------      ---------       ---------    -------         ---------
+  traf_out        ipfw            ipfw         00000001        2
+  traf_in         ipfw            ipfw         00000001        1
+</pre>
+
+Видно, что у ноды nod1 два хука: traf_in и traf_out, которые подключены к хукам 1 и 2
+ноды с именем ipfw. Данные попадают в ноду ipfw через т.н. куки - число, которое
+указывается после команды ngtee или netgraph правила ipfw. Команда netgraph предусматривает, что
+пакет после обработки должен возвращаться в ipfw. Для нас это избыточное действие, поскольку
+сразу после возврата в ipfw мы должны будем применить allow. Используем ngtee чтобы применить allow
+без возврата пакета в ipfw. Продолжаем тестирование, временно отправим весь трафик в ng_ipacct:<br>
+<br>
+
+bash# ipfw add 90 ngtee 1 ip from any to any in<br>
+bash# ipfw add 91 ngtee 2 ip from any to any out<br>
+<br>
+bash# ipacctctl nod1:traf clear<br>
+bash# ipacctctl nod1:traf checkpoint<br>
+<br>
+Смотрим результаты по входящему и исходящему трафику:<br>
+<br>
+bash# ipacctctl -i nod1:traf show<br>
+bash# ipacctctl -o nod1:traf show<br>
+<br>
+
+Если все ок - заканчиваем тестирование:<br>
+<br>
+bash# ipfw delete 90<br>
+bash# ipfw delete 91<br>
+<br>
+
+Фаервол практически ничем не отличается от использующего ipcad в режиме divert:<br>
+<br>
+<div class='code'>
+<pre>
+#!/bin/sh -
+f='/sbin/ipfw'
+
+ifOut='em0'
+
+# Deny Nets
+${f} table 120 flush
+${f} table 120 add 224.0.0.0/4
+${f} table 120 add 192.168.0.0/16
+${f} table 120 add 172.16.0.0/12
+
+${f} -f flush
+
+${f} add 50 allow tcp from any to me 22
+${f} add 51 allow tcp from me 22 to any
+
+${f} add 100 deny tcp from any to any 445
+
+${f} add 110 allow ip from any to any via lo0
+${f} add 120 skipto 1000 ip from me to any
+${f} add 130 deny icmp from any to any in icmptype 5,9,13,14,15,16,17
+${f} add 140 deny ip from any to "table(120)"
+${f} add 150 deny ip from "table(120)" to any
+${f} add 160 skipto 2000 ip from any to me
+
+${f} add 200 skipto 32500 ip from any to any via ${ifOut} in
+${f} add 210 ngtee 1 ip from any to any via ${ifOut}
+
+${f} add 300 skipto 4500 ip from any to any in
+
+${f} add 400 ngtee 2 ip from any to any recv ${ifOut}
+${f} add 410 ngtee 3 ip from any to any
+
+${f} add 1000 allow udp from any 53,7723 to any
+${f} add 1010 allow tcp from any to any setup keep-state
+${f} add 1020 allow udp from any to any keep-state
+${f} add 1100 allow ip from any to any
+
+${f} add 2000 check-state
+${f} add 2010 allow icmp from any to any
+${f} add 2020 allow tcp from any to any 80,443
+${f} add 2050 deny ip from any to any via ${ifOut}
+${f} add 2060 allow udp from any to any 53,7723
+${f} add 2100 deny ip from any to any
+</pre>
+</div>
+<br>
+
+
+Отличие заключается в том, что в случае с ipcad, последний регистрировал на своем порту № 1 исходящий трафик
+для клиента, а на порту № 2 - входящий. Если трафик шел от одного абонента к другому, причем оба абонента
+обслуживались текущим маршрутизатором, то фаервол посылал пакеты на оба порта 1 и 2.<br>
+<br>
+
+Поскольку ngtee, кроме отсылки пакета в netgraph, эквивалент allow (при net.inet.ip.fw.one_pass=1), то
+дважды в netgraph один пакет послать не получится. Можно было `раздвоить` пакет в самом netgraph специальными нодами,
+но мы пошли по иному пути - пакеты отосланные на `ngtee 3` будут регистрироваться в дополнительной ноде с
+именем nod2. Куки с номером 4 не будут нами использоваться, тем не менее в ipacct.sh они подключены, поскольку автору
+пока не известно как будет реагировать ng_ipacct на неподключенный хук его ноды.<br>
+<br>
+
+
+
+В веб-адмике, в настройках коллекторов в правом столбце укажим комментарий к коллектору &#171;ipacct:&#187;,
+что сообщит ядру о типе коллектора.<br>
+<br>
+<br>
+<br>
+<br>
+<br>
+<br>
+<br>
+<br>
+
+<br>
+</body>
+</html>

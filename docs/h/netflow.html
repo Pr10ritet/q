@@ -1,0 +1,386 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<title>Nodeny - Install</title>
+<meta http-equiv="Content-Type" content="text/html; charset=windows-1251">
+<link rel='stylesheet' href='../i/nody.css' type='text/css'>
+</head>
+<body>
+<div class='mainbody'>
+<table border=0 width=90% class="coment"><tr>
+<td><a href="../index.html"><img src="../i/logo.gif" border=0 valign=middle></a></td>
+<td align=center><b>Биллинговая система NoDeny. Настройка учета трафика с netflow-коллекторов</b></td>
+</tr></table>
+<br><br>
+
+
+Для сбора статистики по netflow необходимо 2 узла: сенсор и коллектор. Сенсор собирает статистику трафика и
+отправляет в коллектор. Коллекторы netflow устанавливаются не на удаленных маршрутизаторах
+(как в ipcad), а на сервере с ядром NoDeny. Таким образом, вся статистика
+сливается на центральный сервер. Это имеет и преимущества и недостатки - например,
+коллектор ipcad агрегирует информацию перед тем как она будет забрана с удаленного маршрутизатора.<br>
+<br>
+
+
+К преимуществам netflow также относится то, что многие устройства поддерживают
+экспорт статистики по этой технологии, в отличие от ipcad, который на данный момент
+распростаняется только в unix-системах, т.е его использование ограничено
+&#171;софтовыми&#187; роутерами.<br>
+<br>
+
+Начнем установку с пакета <em>flow-tools</em>, в состав которого входит netflow-коллектор
+flow-capture. На сервере с ядром NoDeny:<br>
+<br>
+
+<div class='code'><div class='mark'>Команда bash</div><pre>
+cd /usr/ports/net-mgmt/flow-tools && make install clean
+</pre>
+</div>
+<br>
+
+Хотя в /usr/local/etc/rc.d/ будет установлен скрипт для запуска flow-capture, тем не менее,
+мы запустим с командной строки:<br>
+<br>
+
+<div class='code'><div class='mark'>Команда bash</div><pre>
+/usr/local/bin/flow-capture -R /usr/local/nodeny/netflow_8888.pl \
+&nbsp;&nbsp;&nbsp; -p /var/run/flow-capture/flow-capture.pid -w /var/db/flows \
+&nbsp;&nbsp;&nbsp; -n1 -N0 0.0.0.0/0.0.0.0/8888
+</pre>
+</div>
+<br>
+
+
+Здесь:<br>
+<br>
+<ul>
+<li>0.0.0.0/0.0.0.0/8888 - принимаем данные от сенсора на порт 8888.
+Обратите внимание, что мы разрешили принимать трафик с любого ip - в будущем укажите
+адрес действительного маршрутизатора, вы же не хотите чтобы вам навязывали регистрацию
+&#171;левого&#187; трафика?</li><br>
+<br>
+
+<li>-R /usr/local/nodeny/netflow_8888.pl  - поток netflow, принимаемый на порт 8888,
+будет обрабатываться скриптом netflow_8888.pl.</li><br>
+<br>
+
+<li>-n1 - фактически отключаем автоматическую ротацию файлов, поскольку статистику будем получать
+по требованию.</li><br>
+<br>
+
+<li>-N0 - не создавать подпапки с годом/месяцем и т.д.</li><br>
+<br>
+
+<li>/var/run/flow-capture/flow-capture.pid - pid файл, важно. Проверьте, что после запуска
+появится файл: <em>/var/run/flow-capture/flow-capture.pid.8888.</em></li><br>
+<br>
+
+<li>/var/db/flows - куда flow-capture будет записывать свои файлы. Надо:<br>
+<br>
+<div class='code'><div class='mark'>Команда bash</div><pre>
+mkdir /var/db/flows
+</pre>
+</div>
+</li>
+<br>
+
+</ul>
+
+
+<br>
+Заливаем на сервер с ядром файл netflow.pl в папку /usr/local/nodeny.<br>
+<br>
+<div class='code'><div class='mark'>Команда bash</div><pre>
+chmod 700 /usr/local/nodeny/netflow.pl
+</pre>
+</div>
+
+<br>
+Внимание! Не переименовывайте файл в netflow_8888.pl - он создается автоматически.<br>
+<br>
+<br>
+
+Теперь необходимо настроить экспорт netflow-статистики от сенсора к коллектору. Здесь
+NoDeny предусматривает 2 различных варианта:<br>
+<br>
+
+
+1) &#171;Классический&#187; - на маршрутизатор устанавливается netflow-сенсор,
+который регистрирует входящий трафик со всех интерфейсов. Обратите внимание, важно:
+входящий трафик со всех интерфейсов.<br>
+<br>
+2) Вариант с использованием ng_netflow, когда в коллектор из фаервола посылаются строго
+те пакеты, которые нам необходимы. Эта схема похожа на использование ipcad в режиме divert.<br>
+<br>
+
+Причина использования второго способа заключается в том, что при регистрации входящего трафика
+на интерфейсе, заблокированный фаерволом трафик попадет в коллектор. Например, клиент
+в заблокированном состоянии включает компьютер, запускаются skype, icq и т.д. Естественно,
+пакеты будут заблокированы, однако клиенту будет насчитан исходящий трафик. В политике
+большинства сетей такой трафик не должен засчитываться клиенту. На самом деле, это классическое
+противоречие: для администратора весь трафик должен регистрироваться, с этим условием
+и возникла концепция netflow учитывать только входящий трафик, но обязательно на всех интерфейсах.
+К сожалению, это входит в противоречие с методами тарификации провайдеров, работающих с
+частными абонентами.<br>
+<br>
+
+Поступим так: для &#171;железных&#187; решений (Микротик, Cisco и т.д) будем применять 1й метод,
+для &#171;софтовых&#187; - 2й.<br>
+<br>
+
+По первому методу настраивать проще, с него и начнем. На маршрутизаторе, на котором необходимо
+регистрировать трафик, настраиваем экспорт netflow-статистики на сервер с ядром NoDeny на порт 8888.
+Напоминаем, вы должны настроить регистрацию только входящего трафика со всех интерфейсов.
+Не забывайте, что входящий на &#171;внешний&#187; интерфейс трафик - входящий для клиента,
+если не регистрировать на этом интерфейсе, то у нас будут данных только по исходящиму трафику
+клиента. Например, для mikrotik-а:<br>
+<br>
+
+
+<div class='code'><div class='mark'>Команды в консоли mikrotik</div><pre>
+/ip traffic-flow target add address=10.20.30.40:8888 version=5
+/ip traffic-flow set enabled=yes cache-entries=4k active-flow-timeout=00:01:00 inactive-flow-timeout=00:00:05 interfaces=all
+</pre>
+</div>
+
+В веб-админке &#171;Операции&#187; &rarr; &#171;Настройки&#187; &rarr; &#171;Коллекторы трафика&#187;
+указываем параметры коллектора: в первой колонке вводим &#171;8888&#187;, во второй -
+ &#171;netflow: коллектор сервера xx.xx.xx.xx&#187;.<br>
+<br>
+8888 - это номер порта netflow-коллектора, на который будут идти данные от netflow сенсоров.
+Номер порта придумывается админом. Фактически номер порта - это идентификатор netflow-коллектора,
+которых может быть несколько, каждый привязан к своему порту. Комментарий к коллектору (2й столбец в настройках)
+обязательно должен начинаться со строки &#171;netflow:&#187;.<br>
+<br>
+После рестарта ядра, ждем минуту - дожидаемся пока ядро не запросит статистику. Смотрим,
+появился ли файл netflow_8888.pl:<br>
+<br>
+
+<div class='code'><div class='mark'>Команда bash</div><pre>
+ls /usr/local/nodeny/netflow_8888.pl
+</pre>
+</div>
+<br>
+
+
+Данный файл создается автоматически. Когда ядро начинает опрашивать коллекторы, оно запускает скрипт
+/usr/local/nodeny/netflow.pl и передает ему параметры: номер порта (в данном случае, 8888) и
+имя файла, в который должна быть записана статистика (например, /usr/local/nodeny/sql/1-1229522476).
+netflow.pl создает файл netflow_8888.pl и &#171;вписывает&#187; в него переданные параметры.
+Такой механизм приходится использовать из-за того, что коллектор flow-capture с точки зрения управления
+не дает нам никаких средств кроме посылки сигнала -HUP, т.о. у нас нет средств передать ему какие-либо параметры.
+Передавать параметры иными средствами тоже имеют недостатки, которые для экономии места здесь не
+освещаются.<br>
+<br>
+После создания файла netflow_8888.pl, netflow.pl посылает сигнал -HUP коллектору flow-capture, который
+формирует файл со статистикой в папке /var/db/flows, запускает netflow_8888.pl и передает в качестве
+параметра полное название файла со статистикой. netflow_8888.pl подгоняет статистику под нужный ядру вид
+и записывает в файл, имя которого было указано ядром.<br>
+<br>
+На самом деле, статистика netflow и ipcad практически ничем не отличается. Отличия только в том,
+что в netflow есть очень нужные для NoDeny параметры, такие как: интерфейс роутера, на который пришел пакет
+и интерфейс роутера, через который пакет покинет систему. Почему они нам важны будет разъяснено
+чуть ниже, а при данной настройке мы их пока не задействуем.<br>
+<br>
+
+В веб-админке проверяем учитывается ли трафик - сначала смотрим страницу мониторинга на предмет не сообщает
+ли ядро о неудаче в получении статистики.<br>
+<br>
+Если не получается настроить, то пойдем последовательно. Проверим, что статистика регистрируется коллектором:<br>
+<br>
+<div class='code'><div class='mark'>Команды bash</div><pre>
+rm /var/db/flows/ft*
+kill -HUP `cat /var/run/flow-capture/flow-capture.pid.8888`
+ls /var/db/flows/
+</pre>
+</div>
+<br>
+
+Если будет отображен файл, начинающийся с &#171;ft&#187; - коллектор реагирует на сигналы. Посмотрим, что он насобирал:<br>
+<br>
+bash# flow-print < /var/db/flows/ft-v05.2008-12-17.141129+0000<br>
+<br>
+Если вывод не содержит информации о трафике, а он реально регистрировался на удаленном роутере - проверяем не заблокировали
+мы в фаерволе udp-порт 8888, запускаем:<br>
+<br>
+
+<div class='code'><div class='mark'>Команда bash</div><pre>
+tcpdump -iem0 -p -n udp port 8888
+</pre>
+</div>
+<br>
+<br>
+<br>
+<br>
+
+
+
+
+<b>Способ настройки netflow посредством ng_netflow.</b><br>
+<br>
+Компилируем ядро с опциями:
+<div class=mess>
+<pre>
+options		NETGRAPH
+options		NETGRAPH_SOCKET
+options		NETGRAPH_IPFW
+options		NETGRAPH_NETFLOW
+options		NETGRAPH_KSOCKET
+</pre>
+</div>
+
+либо подгружаем в виде модулей:
+<div class=mess>
+<pre>
+kldload netgraph
+kldload ng_socket
+kldload ng_ipfw
+kldload ng_netflow
+kldload ng_ksocket
+
+echo ng_netflow_load=\"YES\" &gt;&gt; /boot/loader.conf
+echo ng_socket_load=\"YES\" &gt;&gt; /boot/loader.conf
+echo ng_ksocket_load=\"YES\" &gt;&gt; /boot/loader.conf
+echo ng_ipfw_load=\"YES\" &gt;&gt; /boot/loader.conf
+</pre>
+</div>
+
+
+<div class='code'><div class='mark'>Команда bash</div><pre>
+/usr/sbin/ngctl -f- <<-NODENY
+   mkpeer ipfw: netflow 100 iface0
+   name ipfw:100 netflow
+   msg netflow: setdlt { iface = 0 dlt = 12 }
+   mkpeer netflow: ksocket export inet/dgram/udp
+   msg netflow:export connect inet/127.0.0.1:8888
+NODENY
+</pre>
+</div>
+<br>
+
+Вкратце. Используя netgraph-утилиту ngctl, создали ноду netflow и &#171;соединили&#187; ее с ipfw
+через куки с номером 100. Установили регистрацию ip (dlt = 12), связали с нодой ksocket, которая
+будет экспортировать данные на коллектор по адресу 127.0.0.1 порт 8888.<br>
+<br>
+Теперь возьмем фаервол, использующий divert ipcad, и изменением всего нескольких строк, получим:<br>
+<br>
+<div class="coment">
+<pre>
+#!/bin/sh -
+f='/sbin/ipfw'
+
+ifOut='em0'
+
+# Сети, в/из которых трафик блокируем
+${f} table 120 flush
+${f} table 120 add 224.0.0.0/4
+${f} table 120 add 192.168.0.0/16
+${f} table 120 add 172.16.0.0/12
+
+${f} -f flush
+
+${f} add 50 allow tcp from any to me 22
+${f} add 51 allow tcp from me 22 to any
+
+${f} add 100 deny tcp from any to any 445
+
+${f} add 110 allow ip from any to any via lo0
+${f} add 120 skipto 1000 ip from me to any
+${f} add 130 deny icmp from any to any in icmptype 5,9,13,14,15,16,17
+${f} add 140 deny ip from any to "table(120)"
+${f} add 150 deny ip from "table(120)" to any
+${f} add 160 skipto 2000 ip from any to me
+
+${f} add 200 skipto 500 ip from any to any via ${ifOut}
+
+${f} add 300 skipto 4500 ip from any to any in
+
+${f} add 400 ngtee 100 ip from any to any
+${f} add 490 allow ip from any to any
+
+${f} add 500 skipto 32500 ip from any to any in
+${f} add 510 ngtee 100 ip from any to any
+${f} add 540 allow ip from any to any
+
+
+${f} add 1000 allow udp from any 53,7723 to any
+${f} add 1010 allow tcp from any to any setup keep-state
+${f} add 1020 allow udp from any to any keep-state
+${f} add 1100 allow ip from any to any
+
+${f} add 2000 check-state
+${f} add 2010 allow icmp from any to any
+${f} add 2020 allow tcp from any to any 80,443
+${f} add 2050 deny ip from any to any via ${ifOut}
+${f} add 2060 allow udp from any to any 53,7723
+
+
+${f} add 2100 deny ip from any to any
+</pre>
+</div>
+<br>
+<br>
+
+В веб-адмике, в настройках коллекторов вместо порта &#171;8888&#187; укажите &#171;8888:1&#187;, где 1 - порядковый
+номер внешнего интерфейса при выводе ifconfig (нумерация с единицы). Благодаря указанию внешнего интерфейса,
+у вас получится универсальная схема, при которой вы можете задействовать любое количество маршрутизаторов и при этом
+корректно регистрировать локальный трафик. Если внешних интерфейсов несколько, то их необходимо перечислить
+через запятую, например: &#171;8888:1,3&#187;. Во втором столбце обязательно укажите комментарий начинающийся с
+&#171;netflow:&#187;!<br>
+<br>
+<br>
+<b>Автозапуск</b>.<br>
+<br>
+<div class='code'><div class='mark'>Команда bash</div><pre>
+ee /usr/local/etc/rc.d/ngnetflow.sh
+</pre>
+</div>
+<br>
+
+<div class=code>
+<pre>
+#!/bin/sh
+. /etc/rc.subr
+
+name="ngnetflow"
+rcvar=`set_rcvar`
+
+load_rc_config $name
+: ${ngnetflow_enable="YES"}
+
+start_cmd="ngnetflow_start"
+stop_cmd="ngnetflow_stop"
+
+ngnetflow_start() {
+
+/usr/sbin/ngctl -f /usr/local/nodeny/netflow.txt
+
+}
+
+ngnetflow_stop() {
+/usr/sbin/ngctl -f- &lt;&lt;-NODENY
+shutdown netflow:
+NODENY
+}
+
+run_rc_command "$1"
+</pre>
+</div>
+<br>
+
+<div class='code'><div class='mark'>Команды bash</div><pre>
+chmod 700 /usr/local/etc/rc.d/ngnetflow.sh
+echo ngnetflow_enable=\"YES\" >> /etc/rc.conf
+</pre>
+</div>
+<br>
+<br>
+<br>
+<br>
+<br>
+<br>
+<br>
+
+<br>
+</body>
+</html>

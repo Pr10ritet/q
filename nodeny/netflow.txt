@@ -1,0 +1,5 @@
+mkpeer ipfw: netflow 100 iface0
+name ipfw:100 netflow
+msg netflow: setdlt { iface = 0 dlt = 12 }
+mkpeer netflow: ksocket export inet/dgram/udp
+msg netflow:export connect inet/127.0.0.1:8888

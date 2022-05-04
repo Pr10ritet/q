@@ -1,0 +1,44 @@
+#!/bin/sh -
+f='/sbin/ipfw'
+
+ifOut='em0'
+
+${f} -f flush
+
+${f} add 50 allow tcp from any to me 22
+${f} add 51 allow tcp from me 22 to any
+
+${f} add 110 allow ip from any to any via lo0
+${f} add 120 skipto 1000 ip from me to any
+${f} add 130 deny icmp from any to any in icmptype 5,9,13,14,15,16,17
+${f} add 160 skipto 2000 ip from any to me
+
+${f} add 200 skipto 500 ip from any to any via ${ifOut}
+
+${f} add 300 skipto 4500 ip from any to any in
+
+${f} add 400 skipto 450 ip from any to any recv ${ifOut}
+${f} add 420 divert 1 ip from any to any
+${f} add 450 divert 2 ip from any to any
+${f} add 490 allow ip from any to any
+
+${f} add 500 skipto 32500 ip from any to any in
+${f} add 510 divert 1 ip from any to any
+${f} add 540 allow ip from any to any
+
+
+${f} add 1000 allow udp from any 53,7723 to any
+${f} add 1010 allow tcp from any to any setup keep-state
+${f} add 1020 allow udp from any to any keep-state
+${f} add 1100 allow ip from any to any
+
+${f} add 2000 check-state
+${f} add 2010 allow icmp from any to any
+${f} add 2020 allow tcp from any to any 80,443
+${f} add 2050 deny ip from any to any via ${ifOut}
+${f} add 2060 allow udp from any to any 53,7723
+
+${f} add 2100 deny ip from any to any
+
+${f} add 32490 deny ip from any to any
+
