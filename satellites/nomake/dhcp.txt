@@ -1,0 +1,41 @@
+<file>dhcp.conf</file>
+<reload>/usr/local/etc/rc.d/isc-dhcpd restart</reload>
+
+allow unknown-clients;
+option domain-name-servers 10.0.221.1, 192.168.21.250;
+
+default-lease-time 28800;
+min-lease-time 10000;
+max-lease-time 128800;
+
+authoritative;
+
+ddns-update-style interim;
+
+log-facility local7;
+
+
+subnet 10.0.0.0 netmask 255.255.255.0 {
+	option subnet-mask 255.255.255.0;
+	option broadcast-address 10.0.0.255;
+<filtr net='10.0.0.0/24'>
+	host <lat_login> {
+		hardware ethernet <dopdata-_mac>;
+		fixed-address <ip>;
+	}
+</filtr>
+}
+
+
+subnet 10.1.1.0 netmask 255.255.255.0 {
+	option broadcast-address 10.1.1.255;
+	option routers 10.1.1.1;
+<filtr net='10.1.1.0/24'>
+	host <lat_login> {
+		hardware ethernet <dopdata-_mac>;
+		fixed-address <ip>;
+	}
+</filtr>
+}
+
+

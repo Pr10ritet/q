@@ -1,0 +1,6 @@
+<file>example2.conf</file>
+
+<filtr dopdata-_mac='^..:..:..:..:..:..$' state='^on$'>
+  <ip>: <dopdata-_mac>
+</filtr>
+

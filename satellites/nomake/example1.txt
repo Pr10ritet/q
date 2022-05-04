@@ -1,0 +1,8 @@
+<file>example1.conf</file>
+<template>1</template>
+
+Login = ip:
+
+<filtr><lat_login> = <ip>
+</filtr>
+
